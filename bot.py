@@ -160,6 +160,9 @@ async def generate(user_content: str) -> str:
 @client.event
 async def on_ready():
     print(f"Cappie online como {client.user}")
+    await client.change_presence(
+        activity=discord.CustomActivity(name="Me marque para ter uma conversa comigo -w-")
+    )
 
 
 @client.event
