@@ -9,7 +9,7 @@ DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]          # variável no Railway
 MODEL = os.getenv("MODEL", "gemini-3.8-flash")       # troque se quiser outro modelo
 FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "gemini-3.5-flash-lite")  # reserva se o principal estiver lotado
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")               # opcional: reserva quando o Gemini estiver lotado
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 PROVIDER = os.getenv("PROVIDER", "gemini")             # "gemini" ou "groq" (quem tenta primeiro)
 HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "10"))  # quantas mensagens anteriores lembrar
 
@@ -120,12 +120,14 @@ async def groq_generate(user_content: str) -> str:
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
     body = {
         "model": GROQ_MODEL,
-        "max_tokens": 800,
+        "max_tokens": 1500,  # modelos de raciocínio gastam parte disso "pensando"
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
         ],
     }
+    if "gpt-oss" in GROQ_MODEL:
+        body["reasoning_effort"] = "low"  # pensa pouco = responde mais rápido
     timeout = aiohttp.ClientTimeout(total=20)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(
