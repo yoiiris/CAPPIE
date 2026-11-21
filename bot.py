@@ -1,10 +1,12 @@
 import os
+import asyncio
 import discord
 from google import genai
-from google.genai import types
+from google.genai import types, errors
 
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]          # variável no Railway
 MODEL = os.getenv("MODEL", "gemini-2.5-flash")       # troque se quiser outro modelo
+FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "gemini-2.5-flash-lite")  # reserva se o principal estiver lotado
 HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "10"))  # quantas mensagens anteriores lembrar
 
 SYSTEM_PROMPT = """Você é Cappie, uma bot de Discord com a personalidade da Mai Sakurajima \
@@ -86,6 +88,30 @@ def split_text(text: str, size: int = 1900):
     return [text[i:i + size] for i in range(0, len(text), size)] or ["..."]
 
 
+async def generate(user_content: str) -> str:
+    """Tenta o modelo principal e o de reserva, com novas tentativas em caso de sobrecarga."""
+    config = types.GenerateContentConfig(
+        system_instruction=SYSTEM_PROMPT,
+        max_output_tokens=1024,
+    )
+    last_error = None
+    for model in (MODEL, FALLBACK_MODEL):
+        for attempt in range(3):
+            try:
+                resp = await ai.aio.models.generate_content(
+                    model=model, contents=user_content, config=config
+                )
+                return (resp.text or "").strip()
+            except errors.APIError as e:
+                last_error = e
+                if e.code in (429, 500, 503, 504):  # temporário: espera e tenta de novo
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+                print(f"Erro com {model}:", e)
+                break  # erro permanente (ex.: 404): vai para o próximo modelo
+    raise last_error
+
+
 @client.event
 async def on_ready():
     print(f"Cappie online como {client.user}")
@@ -109,15 +135,7 @@ async def on_message(message: discord.Message):
 
     async with message.channel.typing():
         try:
-            resp = await ai.aio.models.generate_content(
-                model=MODEL,
-                contents=user_content,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    max_output_tokens=1024,
-                ),
-            )
-            text = (resp.text or "").strip()
+            text = await generate(user_content)
             if not text:
                 text = "Hm... prefiro não responder isso. Vamos falar de outra coisa?"
         except Exception as e:
