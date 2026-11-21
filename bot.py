@@ -1,5 +1,6 @@
 import os
 import asyncio
+import aiohttp
 import discord
 from google import genai
 from google.genai import types, errors
@@ -7,6 +8,9 @@ from google.genai import types, errors
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]          # variável no Railway
 MODEL = os.getenv("MODEL", "gemini-2.5-flash")       # troque se quiser outro modelo
 FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "gemini-2.5-flash-lite")  # reserva se o principal estiver lotado
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")               # opcional: reserva quando o Gemini estiver lotado
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+PROVIDER = os.getenv("PROVIDER", "gemini")             # "gemini" ou "groq" (quem tenta primeiro)
 HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "10"))  # quantas mensagens anteriores lembrar
 
 SYSTEM_PROMPT = """Você é Cappie, uma bot de Discord com a personalidade da Mai Sakurajima \
@@ -89,8 +93,7 @@ def split_text(text: str, size: int = 1900):
     return [text[i:i + size] for i in range(0, len(text), size)] or ["..."]
 
 
-async def generate(user_content: str) -> str:
-    """Tenta o modelo principal e o de reserva, com novas tentativas em caso de sobrecarga."""
+async def gemini_generate(user_content: str) -> str:
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         max_output_tokens=800,
@@ -103,13 +106,52 @@ async def generate(user_content: str) -> str:
                     model=model, contents=user_content, config=config
                 )
                 return (resp.text or "").strip()
-            except (errors.APIError, asyncio.TimeoutError, Exception) as e:
+            except Exception as e:
                 last_error = e
-                if getattr(e, 'code', None) in (429, 500, 503, 504, None):  # temporário: espera e tenta de novo
-                    await asyncio.sleep(1)
+                if getattr(e, "code", None) in (429, 500, 503, 504, None):
+                    await asyncio.sleep(1)  # temporário: tenta de novo
                     continue
                 print(f"Erro com {model}:", e)
-                break  # erro permanente (ex.: 404): vai para o próximo modelo
+                break  # erro permanente: vai para o próximo modelo
+    raise last_error
+
+
+async def groq_generate(user_content: str) -> str:
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+    body = {
+        "model": GROQ_MODEL,
+        "max_tokens": 800,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+    }
+    timeout = aiohttp.ClientTimeout(total=20)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(
+            "https://api.groq.com/openai/v1/chat/completions", json=body, headers=headers
+        ) as r:
+            data = await r.json()
+            if r.status != 200:
+                raise RuntimeError(f"Groq {r.status}: {data}")
+            return (data["choices"][0]["message"]["content"] or "").strip()
+
+
+async def generate(user_content: str) -> str:
+    """Tenta o provedor principal e, se falhar, o outro (se a chave do Groq existir)."""
+    providers = [gemini_generate]
+    if GROQ_API_KEY:
+        providers.append(groq_generate)
+    if PROVIDER == "groq":
+        providers.reverse()
+
+    last_error = None
+    for fn in providers:
+        try:
+            return await fn(user_content)
+        except Exception as e:
+            print(f"Erro em {fn.__name__}:", e)
+            last_error = e
     raise last_error
 
 
