@@ -6,8 +6,8 @@ from google import genai
 from google.genai import types, errors
 
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]          # variável no Railway
-MODEL = os.getenv("MODEL", "gemini-2.5-flash")       # troque se quiser outro modelo
-FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "gemini-2.5-flash-lite")  # reserva se o principal estiver lotado
+MODEL = os.getenv("MODEL", "gemini-3.8-flash")       # troque se quiser outro modelo
+FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "gemini-3.5-flash-lite")  # reserva se o principal estiver lotado
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")               # opcional: reserva quando o Gemini estiver lotado
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 PROVIDER = os.getenv("PROVIDER", "gemini")             # "gemini" ou "groq" (quem tenta primeiro)
