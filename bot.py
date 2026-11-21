@@ -43,7 +43,8 @@ client = discord.Client(
     intents=intents,
     allowed_mentions=discord.AllowedMentions.none(),
 )
-ai = genai.Client()  # lê GEMINI_API_KEY do ambiente
+# timeout de 15s por tentativa, para ela não ficar "digitando" por muito tempo
+ai = genai.Client(http_options=types.HttpOptions(timeout=15000))  # lê GEMINI_API_KEY do ambiente
 
 
 async def get_replied_message(message: discord.Message):
@@ -92,20 +93,20 @@ async def generate(user_content: str) -> str:
     """Tenta o modelo principal e o de reserva, com novas tentativas em caso de sobrecarga."""
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
-        max_output_tokens=1024,
+        max_output_tokens=800,
     )
     last_error = None
     for model in (MODEL, FALLBACK_MODEL):
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 resp = await ai.aio.models.generate_content(
                     model=model, contents=user_content, config=config
                 )
                 return (resp.text or "").strip()
-            except errors.APIError as e:
+            except (errors.APIError, asyncio.TimeoutError, Exception) as e:
                 last_error = e
-                if e.code in (429, 500, 503, 504):  # temporário: espera e tenta de novo
-                    await asyncio.sleep(1.5 * (attempt + 1))
+                if getattr(e, 'code', None) in (429, 500, 503, 504, None):  # temporário: espera e tenta de novo
+                    await asyncio.sleep(1)
                     continue
                 print(f"Erro com {model}:", e)
                 break  # erro permanente (ex.: 404): vai para o próximo modelo
