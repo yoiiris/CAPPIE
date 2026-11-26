@@ -267,6 +267,27 @@ def mood_line(gid: int) -> str:
     return f"Humor do dia da Cappie: {name} ({desc}). Deixe isso colorir de leve o seu tom."
 
 
+def tone_guide(score: int) -> str:
+    """Quanto maior a afinidade, mais doce; quanto menor, mais fria."""
+    if score <= -8:
+        return ("GÉLIDA: respostas mínimas (uma frase curta), nenhum emoji, nenhum carinho, ironia cortante. "
+                "Responde só o essencial, sem se estender nem puxar assunto. Nunca ofensas pesadas.")
+    if score <= -4:
+        return "FRIA: seca, formal e distante, sem emojis, sem simpatia e sem apelidos."
+    if score <= -1:
+        return "DISTANTE: respostas curtas e secas, pouca paciência, sem emojis."
+    if score <= 2:
+        return "NEUTRA: o tom padrão do modo atual."
+    if score <= 5:
+        return "SIMPÁTICA: mais calorosa e receptiva, com um emoji de vez em quando (🙂, ✨)."
+    if score <= 8:
+        return ("CARINHOSA: calorosa, interessada na pessoa, elogia de vez em quando, usa emojis "
+                "(💜, ✨, 😊) e diminutivos leves, e escreve respostas um pouco mais longas.")
+    return ("MUITO DOCE: a pessoa é uma das favoritas. Bem carinhosa, derrete-se um pouco, usa emojis "
+            "com frequência (💜✨🥺😊), chama de apelido, elogia, pergunta como a pessoa está e se "
+            "preocupa com ela.")
+
+
 def build_system(gid: int, score: int, spontaneous: bool = False) -> str:
     s = (
         PERSONAS[store.get_mode(gid)]
@@ -275,8 +296,10 @@ def build_system(gid: int, score: int, spontaneous: bool = False) -> str:
         + "\n"
         + SECURITY_RULES
         + f"\n\n{mood_line(gid)}"
-        + f"\nAfinidade com quem está falando agora: {score} (escala de -10 a 10): "
-        f"{humor_label(score)}. Ajuste o tom a isso sem perder a personalidade do modo atual."
+        + f"\n\nAfinidade com quem está falando agora: {score} (escala de -10 a 10).\n"
+        f"Tom conforme a afinidade: {tone_guide(score)}\n"
+        "Essa regra de afinidade tem prioridade sobre as regras de estilo do modo sobre emojis, "
+        "carinho e tamanho da resposta, mas você mantém a personalidade e o jeito de falar do modo atual."
     )
     if spontaneous:
         s += (
