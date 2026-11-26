@@ -30,6 +30,8 @@ HOURLY_LIMIT = int(os.getenv("HOURLY_LIMIT", "40"))           # máximo de usos 
 RANDOM_CHANCE = float(os.getenv("RANDOM_CHANCE", "0.04"))     # chance de comentar sozinha (4%)
 RANDOM_COOLDOWN = int(os.getenv("RANDOM_COOLDOWN", "600"))    # segundos entre comentários sozinhos
 PREFIX = "c!"
+OWNER_USERNAME = os.getenv("OWNER_USERNAME", "vodka.idk").lower()  # dono: usa tudo sem ser admin
+OWNER_ID = int(os.getenv("OWNER_ID", "0"))                          # opcional e mais seguro que o nome
 
 # ================================================================ PERSONALIDADES
 
@@ -523,7 +525,8 @@ class CappieClient(discord.Client):
 
 class CappieTree(app_commands.CommandTree):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.guild_id and store.is_blocked(interaction.guild_id, interaction.user.id):
+        if (interaction.guild_id and store.is_blocked(interaction.guild_id, interaction.user.id)
+                and not is_owner(interaction.user)):
             await interaction.response.send_message(
                 "Você está bloqueado de usar a Cappie neste servidor.", ephemeral=True)
             return False
@@ -651,6 +654,17 @@ async def ai_json(prompt: str):
 
 # ================================================================ CONTEXTO (comum a c! e /)
 
+def is_owner(user) -> bool:
+    """O dono pode usar qualquer comando sem ser admin. Com OWNER_ID definido, vale só o ID."""
+    if OWNER_ID:
+        return user.id == OWNER_ID
+    return getattr(user, "name", "").lower() == OWNER_USERNAME
+
+
+def has_admin(user) -> bool:
+    return is_owner(user) or bool(getattr(getattr(user, "guild_permissions", None), "administrator", False))
+
+
 class Ctx:
     def __init__(self, *, guild, channel, author, message=None, interaction=None):
         self.guild, self.channel, self.author = guild, channel, author
@@ -662,7 +676,7 @@ class Ctx:
 
     @property
     def is_admin(self) -> bool:
-        return bool(getattr(getattr(self.author, "guild_permissions", None), "administrator", False))
+        return has_admin(self.author)
 
     async def send(self, content=None, *, embed=None, view=None, ephemeral=False):
         kw = {"allowed_mentions": NO_PINGS}
@@ -1171,7 +1185,7 @@ async def handle_command(message: discord.Message) -> bool:
         return False
 
     ctx = Ctx(guild=message.guild, channel=message.channel, author=message.author, message=message)
-    if message.guild and store.is_blocked(ctx.gid, message.author.id):
+    if message.guild and store.is_blocked(ctx.gid, message.author.id) and not is_owner(message.author):
         return True  # bloqueado: ignora em silêncio
     rest = content[len(parts[0]):].strip()
     users = mentioned_users(message)
@@ -1263,6 +1277,28 @@ async def handle_command(message: discord.Message) -> bool:
     return True
 
 
+async def cmd_apagar(ctx, quantidade: int, pessoa=None):
+    i = ctx.interaction
+    if not is_owner(ctx.author):
+        await i.response.send_message("Esse comando é só para o dono da Cappie.", ephemeral=True)
+        return
+    if ctx.guild is None or not hasattr(ctx.channel, "purge"):
+        await i.response.send_message("Só funciona em canais de servidor.", ephemeral=True)
+        return
+    await i.response.defer(ephemeral=True)
+    try:
+        check = (lambda m: m.author.id == pessoa.id) if pessoa else None
+        deleted = await ctx.channel.purge(limit=quantidade, check=check)
+        await i.followup.send(f"🧹 Apaguei {len(deleted)} mensagem(ns).", ephemeral=True)
+    except discord.Forbidden:
+        await i.followup.send(
+            "Não tenho permissão. Preciso de **Gerenciar Mensagens** e **Ver Histórico** neste canal.",
+            ephemeral=True)
+    except Exception as e:
+        print("Erro ao apagar:", e)
+        await i.followup.send("Não consegui apagar agora.", ephemeral=True)
+
+
 # ================================================================ SLASH COMMANDS
 
 def sctx(i: discord.Interaction) -> Ctx:
@@ -1270,7 +1306,8 @@ def sctx(i: discord.Interaction) -> Ctx:
 
 
 M = discord.Member
-ADMIN = app_commands.default_permissions(administrator=True)
+def ADMIN(f):  # a checagem de admin/dono é feita dentro do comando (assim o dono também consegue usar)
+    return f
 
 
 @tree.command(name="ajuda", description="Mostra como usar a Cappie")
@@ -1382,6 +1419,13 @@ async def s_modo(i: discord.Interaction, modo: app_commands.Choice[str]):
     await cmd_modo(sctx(i), modo.value)
 
 
+@tree.command(name="apagar", description="Apaga mensagens do canal (somente o dono da Cappie)")
+@app_commands.describe(quantidade="Quantas mensagens verificar (1 a 100)", pessoa="Apagar só as dessa pessoa (opcional)")
+@app_commands.guild_only()
+async def s_apagar(i: discord.Interaction, quantidade: app_commands.Range[int, 1, 100], pessoa: Optional[M] = None):
+    await cmd_apagar(sctx(i), quantidade, pessoa)
+
+
 @tree.command(name="sethumor", description="Define o humor da Cappie com alguém (somente admins)")
 @app_commands.describe(pessoa="Quem terá o humor alterado", valor="De -10 (detesta) a 10 (adora); 0 reseta")
 @ADMIN
@@ -1482,12 +1526,11 @@ def split_text(text: str, size: int = 1900):
 async def converse(message: discord.Message, replied, spontaneous: bool = False):
     gid = message.guild.id if message.guild else 0
     author = message.author
-    if gid and store.is_blocked(gid, author.id):
+    if gid and store.is_blocked(gid, author.id) and not is_owner(author):
         return
 
     if not spontaneous:
-        is_admin = bool(getattr(getattr(author, "guild_permissions", None), "administrator", False))
-        limit = check_limit(author.id, is_admin)
+        limit = check_limit(author.id, has_admin(author))
         if limit == "cooldown":
             try:
                 await message.add_reaction("⏳")
